@@ -1,0 +1,116 @@
+name: Build HEVC delegate bundle
+
+on:
+  workflow_dispatch:
+    inputs:
+      chromium_ref:
+        description: "Chromium tag or ref used to build the delegate bundle."
+        required: false
+        default: "146.0.7680.177"
+        type: string
+      ninja_targets:
+        description: "Optional override. Empty builds only the known required Chromium outputs; use 'chrome' for full Chromium fallback."
+        required: false
+        type: string
+      publish:
+        description: "Publish to the h265-delegate-bundle maintenance release."
+        required: false
+        default: true
+        type: boolean
+      install_build_deps:
+        description: "Run Chromium's install-build-deps.sh on the runner."
+        required: false
+        default: true
+        type: boolean
+
+permissions:
+  contents: write
+
+env:
+  H265_DELEGATE_BUNDLE_RELEASE: h265-delegate-bundle
+  H265_DELEGATE_BUNDLE_ASSET: libh265_delegate_bundle_probe.so
+
+jobs:
+  build:
+    name: Build and publish delegate bundle
+    runs-on: ubuntu-24.04
+    timeout-minutes: 360
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Free runner disk space
+        run: |
+          set -euo pipefail
+          df -h
+          sudo rm -rf \
+            /opt/ghc \
+            /opt/hostedtoolcache/CodeQL \
+            /usr/local/lib/android \
+            /usr/local/share/boost \
+            /usr/share/dotnet \
+            || true
+          sudo apt-get clean
+          df -h
+
+      - name: Install bootstrap tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            curl \
+            file \
+            git \
+            lsb-release \
+            python3 \
+            xz-utils
+
+      - name: Build delegate bundle
+        env:
+          CHROMIUM_REF: ${{ github.event.inputs.chromium_ref }}
+          CHROMIUM_NINJA_TARGETS_INPUT: ${{ github.event.inputs.ninja_targets }}
+          INSTALL_CHROMIUM_BUILD_DEPS_INPUT: ${{ github.event.inputs.install_build_deps }}
+        run: |
+          set -euo pipefail
+
+          export CHROMIUM_WORKDIR="${RUNNER_TEMP}/chromium-work"
+          export CHROMIUM_REF="${CHROMIUM_REF:-146.0.7680.177}"
+
+          if [[ "${INSTALL_CHROMIUM_BUILD_DEPS_INPUT:-true}" == "true" ]]; then
+            export INSTALL_CHROMIUM_BUILD_DEPS=1
+          fi
+
+          if [[ -n "${CHROMIUM_NINJA_TARGETS_INPUT:-}" ]]; then
+            export CHROMIUM_NINJA_TARGETS="$CHROMIUM_NINJA_TARGETS_INPUT"
+          fi
+
+          ./h264-h265/delegate-injection/build-self-contained-bundle.sh
+
+      - name: Verify delegate bundle
+        run: |
+          set -euo pipefail
+
+          bundle="h264-h265/delegate-injection/bin/libh265_delegate_bundle_probe.so"
+          test -s "$bundle"
+          test -x "$bundle"
+          file "$bundle"
+          sha256sum "$bundle" | tee "$bundle.sha256"
+          ldd "$bundle"
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: h265-delegate-bundle
+          path: |
+            h264-h265/delegate-injection/bin/libh265_delegate_bundle_probe.so
+            h264-h265/delegate-injection/bin/libh265_delegate_bundle_probe.so.sha256
+          if-no-files-found: error
+
+      - name: Publish maintenance release
+        if: ${{ github.event.inputs.publish == 'true' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          ./h264-h265/delegate-injection/publish-delegate-bundle.sh

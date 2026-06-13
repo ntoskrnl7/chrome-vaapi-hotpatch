@@ -1,0 +1,72 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>H.264 I420 Encode Test</title>
+<pre id="log"></pre>
+<script>
+const logEl = document.getElementById('log');
+const log = (line) => {
+  console.log(line);
+  logEl.textContent += line + "\n";
+};
+
+const width = 1520;
+const height = 608;
+const ySize = width * height;
+const uvSize = (width >> 1) * (height >> 1);
+
+const config = {
+  codec: 'avc1.420028',
+  width,
+  height,
+  bitrate: 1_837_392,
+  bitrateMode: 'constant',
+  framerate: 30,
+  hardwareAcceleration: 'prefer-hardware',
+  latencyMode: 'quality',
+};
+
+function makeFrame(i) {
+  const data = new Uint8Array(ySize + uvSize * 2);
+  data.fill((32 + i * 3) & 255, 0, ySize);
+  data.fill((96 + i * 5) & 255, ySize, ySize + uvSize);
+  data.fill((160 + i * 7) & 255, ySize + uvSize);
+  return new VideoFrame(data, {
+    format: 'I420',
+    codedWidth: width,
+    codedHeight: height,
+    timestamp: Math.round(i * 1_000_000 / config.framerate),
+    duration: Math.round(1_000_000 / config.framerate),
+  });
+}
+
+async function main() {
+  const support = await VideoEncoder.isConfigSupported(config);
+  log('support=' + JSON.stringify({supported: support.supported, config: support.config}));
+  if (!support.supported) return;
+
+  let chunks = 0;
+  let bytes = 0;
+  const encoder = new VideoEncoder({
+    output(chunk) {
+      chunks++;
+      bytes += chunk.byteLength;
+      log(`chunk ${chunks}: type=${chunk.type} bytes=${chunk.byteLength}`);
+    },
+    error(error) {
+      log('encoder error callback: ' + error.name + ': ' + error.message);
+    },
+  });
+  encoder.configure({...config, ...(support.config || {})});
+  log('configure returned');
+  for (let i = 0; i < 60; i++) {
+    const frame = makeFrame(i);
+    encoder.encode(frame, {keyFrame: i === 0});
+    frame.close();
+  }
+  await encoder.flush();
+  log(`flush resolved chunks=${chunks} bytes=${bytes}`);
+  encoder.close();
+}
+
+main().catch((error) => log('fatal: ' + error.stack));
+</script>

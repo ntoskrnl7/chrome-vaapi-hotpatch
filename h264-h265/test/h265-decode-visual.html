@@ -1,0 +1,337 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Chrome HEVC VAAPI Decode Test</title>
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #101214;
+    color: #edf0f2;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      linear-gradient(135deg, rgba(44, 126, 118, 0.22), transparent 38%),
+      linear-gradient(315deg, rgba(166, 76, 56, 0.16), transparent 36%),
+      #101214;
+  }
+
+  main {
+    width: min(1120px, calc(100vw - 40px));
+    margin: 0 auto;
+    padding: 28px 0 36px;
+  }
+
+  header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 20px;
+    margin-bottom: 20px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.1;
+    letter-spacing: 0;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #aeb5ba;
+    box-shadow: 0 0 0 4px rgba(174, 181, 186, 0.15);
+  }
+
+  .status.running .dot {
+    background: #e5c44a;
+    box-shadow: 0 0 0 4px rgba(229, 196, 74, 0.18);
+  }
+
+  .status.ok .dot {
+    background: #54d18a;
+    box-shadow: 0 0 0 4px rgba(84, 209, 138, 0.18);
+  }
+
+  .status.fail .dot {
+    background: #ff6d6d;
+    box-shadow: 0 0 0 4px rgba(255, 109, 109, 0.18);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.2fr) minmax(330px, 0.8fr);
+    gap: 18px;
+  }
+
+  .panel {
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(19, 23, 25, 0.8);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 46px;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cdd5da;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  video {
+    display: block;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #060708;
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .metric {
+    min-width: 0;
+    padding: 12px 14px;
+    border-right: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  .metric:last-child {
+    border-right: 0;
+  }
+
+  .label {
+    color: #91a0a8;
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .value {
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    font-weight: 780;
+  }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+  }
+
+  button {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: #edf0f2;
+    color: #15181a;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  button.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #edf0f2;
+  }
+
+  pre {
+    height: 380px;
+    margin: 0;
+    padding: 12px 14px;
+    overflow: auto;
+    color: #cbd3d7;
+    background: rgba(0, 0, 0, 0.24);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 850px) {
+    main {
+      width: min(100vw - 24px, 720px);
+      padding-top: 18px;
+    }
+
+    header,
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+  }
+</style>
+<main>
+  <header>
+    <h1>Chrome HEVC VAAPI Decode</h1>
+    <div id="status" class="status">
+      <span class="dot"></span>
+      <span id="statusText">idle</span>
+    </div>
+  </header>
+
+  <section class="grid">
+    <div class="panel">
+      <div class="panel-title">
+        <span>HEVC Main sample</span>
+        <div class="controls">
+          <button id="play">Play</button>
+          <button id="restart" class="secondary">Restart</button>
+        </div>
+      </div>
+      <video id="video" muted playsinline controls></video>
+      <div class="metrics">
+        <div class="metric">
+          <div class="label">Ready</div>
+          <div id="ready" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Decoded</div>
+          <div id="decoded" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Dropped</div>
+          <div id="dropped" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Codec</div>
+          <div class="value">HEVC</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        <span>Decoder probe</span>
+        <span>hvc1 / hev1</span>
+      </div>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const video = document.getElementById('video');
+const logEl = document.getElementById('log');
+const statusEl = document.getElementById('status');
+const statusText = document.getElementById('statusText');
+const readyEl = document.getElementById('ready');
+const decodedEl = document.getElementById('decoded');
+const droppedEl = document.getElementById('dropped');
+const playButton = document.getElementById('play');
+const restartButton = document.getElementById('restart');
+const params = new URLSearchParams(window.location.search);
+const sample = params.get('sample') || 'bear-1280x720-hevc.mp4';
+
+video.src = sample;
+
+function setStatus(state, text) {
+  statusEl.className = `status ${state}`;
+  statusText.textContent = text;
+}
+
+function log(line) {
+  console.log(line);
+  const now = new Date().toLocaleTimeString();
+  logEl.textContent += `[${now}] ${line}\n`;
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function updateQuality() {
+  const quality = video.getVideoPlaybackQuality ? video.getVideoPlaybackQuality() : null;
+  if (quality) {
+    decodedEl.textContent = String(quality.totalVideoFrames);
+    droppedEl.textContent = String(quality.droppedVideoFrames);
+  }
+  if (!video.paused && !video.ended) {
+    requestAnimationFrame(updateQuality);
+  }
+}
+
+async function checkSupport() {
+  const configs = [
+    {codec: 'hvc1.1.6.L93.B0', codedWidth: 1280, codedHeight: 720, hardwareAcceleration: 'prefer-hardware'},
+    {codec: 'hev1.1.6.L93.B0', codedWidth: 1280, codedHeight: 720, hardwareAcceleration: 'prefer-hardware'},
+  ];
+  for (const config of configs) {
+    if (!('VideoDecoder' in window)) {
+      log('VideoDecoder is not available');
+      return;
+    }
+    const support = await VideoDecoder.isConfigSupported(config);
+    log('decoder support=' + JSON.stringify({supported: support.supported, config: support.config}));
+  }
+}
+
+async function play() {
+  try {
+    setStatus('running', 'playing');
+    await video.play();
+    updateQuality();
+  } catch (error) {
+    setStatus('fail', 'play failed');
+    log('play failed: ' + (error.stack || error.message || error));
+  }
+}
+
+playButton.addEventListener('click', play);
+restartButton.addEventListener('click', async () => {
+  video.currentTime = 0;
+  await play();
+});
+
+video.addEventListener('loadedmetadata', () => {
+  readyEl.textContent = `${video.videoWidth}x${video.videoHeight}`;
+  log(`loadedmetadata ${video.videoWidth}x${video.videoHeight} duration=${video.duration.toFixed(3)}`);
+});
+video.addEventListener('playing', () => setStatus('running', 'playing'));
+video.addEventListener('ended', () => {
+  updateQuality();
+  setStatus('ok', 'ended');
+  log(`ended decoded=${decodedEl.textContent} dropped=${droppedEl.textContent}`);
+});
+video.addEventListener('error', () => {
+  setStatus('fail', 'video error');
+  log('video error code=' + (video.error ? video.error.code : 'unknown'));
+});
+
+setStatus('', 'checking');
+log('sample=' + sample);
+checkSupport()
+    .then(() => play())
+    .catch((error) => {
+      setStatus('fail', 'support failed');
+      log('fatal: ' + (error.stack || error.message || error));
+    });
+</script>

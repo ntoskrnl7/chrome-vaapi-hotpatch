@@ -1,0 +1,73 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>H.264 Force Hardware Encode Test NV12 Buffer</title>
+<pre id="log"></pre>
+<script>
+const logEl = document.getElementById('log');
+const log = (line) => {
+  console.log(line);
+  logEl.textContent += line + "\n";
+};
+
+function makeNv12Frame(width, height, index) {
+  const ySize = width * height;
+  const uvSize = width * height / 2;
+  const data = new Uint8Array(ySize + uvSize);
+  for (let y = 0; y < height; y++) {
+    for (let x = 0; x < width; x++) {
+      data[y * width + x] = (x + y + index * 7) & 0xff;
+    }
+  }
+  data.fill(128, ySize);
+  return new VideoFrame(data, {
+    format: 'NV12',
+    codedWidth: width,
+    codedHeight: height,
+    timestamp: Math.round(index * 1_000_000 / 30),
+    duration: Math.round(1_000_000 / 30)
+  });
+}
+
+async function main() {
+  const width = 640;
+  const height = 360;
+  const config = {
+    codec: 'avc1.42E01E',
+    width,
+    height,
+    bitrate: 2_000_000,
+    framerate: 30,
+    hardwareAcceleration: 'prefer-hardware',
+    avc: { format: 'annexb' }
+  };
+
+  const support = await VideoEncoder.isConfigSupported(config);
+  log('isConfigSupported=' + JSON.stringify(support));
+
+  let chunks = 0;
+  const encoder = new VideoEncoder({
+    output(chunk) {
+      chunks++;
+      log(`chunk ${chunks}: type=${chunk.type} bytes=${chunk.byteLength}`);
+    },
+    error(error) {
+      log('encoder error callback: ' + error.name + ': ' + error.message);
+    }
+  });
+
+  encoder.configure(config);
+  log('configure returned');
+
+  for (let i = 0; i < 30; i++) {
+    const frame = makeNv12Frame(width, height, i);
+    encoder.encode(frame, { keyFrame: i === 0 });
+    frame.close();
+  }
+
+  await encoder.flush();
+  log('flush resolved chunks=' + chunks);
+  encoder.close();
+}
+
+main().catch((error) => log('fatal: ' + error.stack));
+</script>

@@ -1,0 +1,6 @@
+{
+  "name": "electron-h265-encode-test",
+  "version": "1.0.0",
+  "main": "electron-main.js",
+  "private": true
+}

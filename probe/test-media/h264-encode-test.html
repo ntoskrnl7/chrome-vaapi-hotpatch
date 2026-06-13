@@ -1,0 +1,104 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>H.264 WebCodecs Encode Test</title>
+<pre id="log"></pre>
+<canvas id="canvas" width="640" height="360"></canvas>
+<script>
+const logEl = document.getElementById('log');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+const log = (line) => {
+  console.log(line);
+  logEl.textContent += line + "\n";
+};
+
+async function main() {
+  if (!('VideoEncoder' in self)) {
+    log('VideoEncoder missing');
+    return;
+  }
+
+  const candidates = [];
+  for (const codec of ['avc1.42E01E', 'avc1.4D401E', 'avc1.640028']) {
+    for (const format of ['annexb', 'avc']) {
+      for (const hardwareAcceleration of ['prefer-hardware', 'no-preference']) {
+        candidates.push({
+          codec,
+          width: canvas.width,
+          height: canvas.height,
+          bitrate: 2_000_000,
+          framerate: 30,
+          hardwareAcceleration,
+          avc: { format }
+        });
+      }
+    }
+  }
+
+  let config = null;
+  for (const candidate of candidates) {
+    const support = await VideoEncoder.isConfigSupported(candidate);
+    log('candidate=' + JSON.stringify({
+      codec: candidate.codec,
+      format: candidate.avc.format,
+      hw: candidate.hardwareAcceleration,
+      supported: support.supported
+    }));
+    if (support.supported && !config) {
+      config = support.config;
+    }
+  }
+
+  log('MediaRecorder video/webm;codecs=h264=' +
+      MediaRecorder.isTypeSupported('video/webm;codecs=h264'));
+  log('MediaRecorder video/mp4;codecs=avc1.42E01E=' +
+      MediaRecorder.isTypeSupported('video/mp4;codecs=avc1.42E01E'));
+
+  if (!config) {
+    log('no supported H.264 VideoEncoder config');
+    return;
+  }
+  log('selected=' + JSON.stringify(config));
+
+  let chunks = 0;
+  let bytes = 0;
+  const encoder = new VideoEncoder({
+    output(chunk, metadata) {
+      chunks++;
+      bytes += chunk.byteLength;
+      log(`chunk ${chunks}: type=${chunk.type} bytes=${chunk.byteLength}` +
+          (metadata && metadata.decoderConfig ? ' decoderConfig=1' : ''));
+    },
+    error(error) {
+      log('encoder error: ' + error.name + ': ' + error.message);
+    }
+  });
+
+  encoder.configure(config);
+  for (let i = 0; i < 90; i++) {
+    ctx.fillStyle = `rgb(${(i * 7) % 255}, ${(i * 13) % 255}, ${(i * 23) % 255})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'white';
+    ctx.font = '48px sans-serif';
+    ctx.fillText('frame ' + i, 40, 90);
+    ctx.fillStyle = 'black';
+    ctx.fillRect(40 + (i * 5) % 520, 170, 80, 80);
+
+    const frame = new VideoFrame(canvas, {
+      timestamp: Math.round(i * 1_000_000 / 30),
+      duration: Math.round(1_000_000 / 30)
+    });
+    encoder.encode(frame, { keyFrame: i === 0 });
+    frame.close();
+    if (i % 10 === 0) {
+      await new Promise(requestAnimationFrame);
+    }
+  }
+  await encoder.flush();
+  encoder.close();
+  log(`done chunks=${chunks} bytes=${bytes}`);
+  document.title = `done chunks=${chunks} bytes=${bytes}`;
+}
+
+main().catch((error) => log('fatal: ' + error.stack));
+</script>

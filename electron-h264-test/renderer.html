@@ -1,0 +1,77 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Electron H.264 Force Hardware Encode Test</title>
+<pre id="log"></pre>
+<canvas id="canvas" width="640" height="360"></canvas>
+<script>
+const logEl = document.getElementById('log');
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d', { alpha: false });
+const log = (line) => {
+  console.log(line);
+  logEl.textContent += line + "\n";
+};
+
+async function main() {
+  if (!('VideoEncoder' in self)) {
+    log('fatal: VideoEncoder missing');
+    return;
+  }
+
+  const config = {
+    codec: 'avc1.42E01E',
+    width: canvas.width,
+    height: canvas.height,
+    bitrate: 2_000_000,
+    framerate: 30,
+    hardwareAcceleration: 'prefer-hardware',
+    avc: { format: 'annexb' }
+  };
+
+  const support = await VideoEncoder.isConfigSupported(config);
+  log('isConfigSupported=' + JSON.stringify(support));
+  if (!support.supported) {
+    log('fatal: prefer-hardware unsupported');
+    return;
+  }
+
+  let chunks = 0;
+  let bytes = 0;
+  const encoder = new VideoEncoder({
+    output(chunk) {
+      chunks++;
+      bytes += chunk.byteLength;
+      log(`chunk ${chunks}: type=${chunk.type} bytes=${chunk.byteLength}`);
+    },
+    error(error) {
+      log('encoder error callback: ' + error.name + ': ' + error.message);
+    }
+  });
+
+  encoder.configure(config);
+  log('configure returned');
+
+  for (let i = 0; i < 60; i++) {
+    ctx.fillStyle = `rgb(${(i * 9) % 255}, ${(i * 17) % 255}, ${(i * 29) % 255})`;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillStyle = 'white';
+    ctx.font = '48px sans-serif';
+    ctx.fillText('hw frame ' + i, 40, 90);
+    const frame = new VideoFrame(canvas, {
+      timestamp: Math.round(i * 1_000_000 / 30),
+      duration: Math.round(1_000_000 / 30)
+    });
+    encoder.encode(frame, { keyFrame: i === 0 });
+    frame.close();
+    if (i % 10 === 0) {
+      await new Promise(requestAnimationFrame);
+    }
+  }
+
+  await encoder.flush();
+  log(`flush resolved chunks=${chunks} bytes=${bytes}`);
+  encoder.close();
+}
+
+main().catch((error) => log('fatal: ' + error.stack));
+</script>

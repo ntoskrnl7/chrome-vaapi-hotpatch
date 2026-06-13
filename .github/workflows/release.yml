@@ -1,0 +1,227 @@
+name: Release packages
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Release tag. Defaults to vYYYYMMDD-HHMMSS for manual runs."
+        required: false
+        type: string
+      prerelease:
+        description: "Mark the GitHub release as a prerelease."
+        required: false
+        default: true
+        type: boolean
+      h265_delegate_bundle_url:
+        description: "Optional URL to a prebuilt libh265_delegate_bundle_probe.so."
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  H265_DELEGATE_BUNDLE_RELEASE: h265-delegate-bundle
+  H265_DELEGATE_BUNDLE_ASSET: libh265_delegate_bundle_probe.so
+
+jobs:
+  release:
+    name: Build release tarballs
+    runs-on: ubuntu-24.04
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential \
+            ca-certificates \
+            coreutils \
+            curl \
+            make \
+            python3 \
+            xz-utils
+
+      - name: Build H.264 release package
+        run: ./h264-only/make-dist.sh
+
+      - name: Prepare H.265 delegate bundle
+        env:
+          INPUT_BUNDLE_URL: ${{ github.event.inputs.h265_delegate_bundle_url }}
+          INPUT_RELEASE_TAG: ${{ github.event.inputs.tag }}
+          SECRET_BUNDLE_URL: ${{ secrets.H265_DELEGATE_BUNDLE_URL }}
+          BUNDLE_RELEASE_TAG: ${{ env.H265_DELEGATE_BUNDLE_RELEASE }}
+          BUNDLE_ASSET_NAME: ${{ env.H265_DELEGATE_BUNDLE_ASSET }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          dest="h264-h265/delegate-injection/bin/libh265_delegate_bundle_probe.so"
+          mkdir -p "$(dirname "$dest")"
+
+          bundle_url="${INPUT_BUNDLE_URL:-${SECRET_BUNDLE_URL:-}}"
+          if [[ -n "$bundle_url" ]]; then
+            curl -L --fail --retry 2 -o "$dest" "$bundle_url"
+            chmod 0755 "$dest"
+            echo "Prepared H.265 delegate bundle from URL."
+            exit 0
+          fi
+
+          tmp="$(mktemp -d)"
+          trap 'rm -rf "$tmp"' EXIT
+
+          mkdir -p "$tmp/bundle-release"
+          if gh release download "$BUNDLE_RELEASE_TAG" \
+              --repo "$GITHUB_REPOSITORY" \
+              --pattern "$BUNDLE_ASSET_NAME" \
+              --dir "$tmp/bundle-release" >/dev/null 2>&1; then
+            install -m 0755 "$tmp/bundle-release/$BUNDLE_ASSET_NAME" "$dest"
+            echo "Prepared H.265 delegate bundle from bundle release: $BUNDLE_RELEASE_TAG"
+            exit 0
+          fi
+
+          candidate_tags=()
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            candidate_tags+=("$GITHUB_REF_NAME")
+          fi
+          if [[ -n "${INPUT_RELEASE_TAG:-}" ]]; then
+            candidate_tags+=("$INPUT_RELEASE_TAG")
+          fi
+
+          latest_tag="$(gh api "repos/$GITHUB_REPOSITORY/releases" \
+            --jq '[.[] | select(.draft == false)][0].tag_name // ""')"
+          if [[ -n "$latest_tag" ]]; then
+            candidate_tags+=("$latest_tag")
+          fi
+
+          for tag in "${candidate_tags[@]}"; do
+            [[ -n "$tag" ]] || continue
+            rm -rf "$tmp/reuse"
+            mkdir -p "$tmp/reuse"
+            if ! gh release download "$tag" \
+                --repo "$GITHUB_REPOSITORY" \
+                --pattern chrome-vaapi-h264-h265-hotpatch.tar.gz \
+                --dir "$tmp/reuse" >/dev/null 2>&1; then
+              continue
+            fi
+            archive="$tmp/reuse/chrome-vaapi-h264-h265-hotpatch.tar.gz"
+            if [[ ! -f "$archive" ]]; then
+              continue
+            fi
+            if tar -xzf "$archive" -C "$tmp/reuse" \
+                chrome-vaapi-h264-h265-hotpatch/delegate-injection/bin/libh265_delegate_bundle_probe.so; then
+              install -m 0755 \
+                "$tmp/reuse/chrome-vaapi-h264-h265-hotpatch/delegate-injection/bin/libh265_delegate_bundle_probe.so" \
+                "$dest"
+              echo "Prepared H.265 delegate bundle from release package: $tag"
+              exit 0
+            fi
+          done
+
+          echo "::error::No H.265 delegate bundle was provided and no reusable release package was found."
+          echo "Build it with h264-h265/delegate-injection/build-self-contained-bundle.sh,"
+          echo "then publish it with h264-h265/delegate-injection/publish-delegate-bundle.sh"
+          echo "or provide h265_delegate_bundle_url / H265_DELEGATE_BUNDLE_URL for this run."
+          exit 1
+
+      - name: Build H.264/H.265 release package
+        run: |
+          set -euo pipefail
+
+          delegate="h264-h265/delegate-injection/bin/libh265_delegate_bundle_probe.so"
+          if [[ ! -x "$delegate" ]]; then
+            echo "::error::missing H.265 delegate bundle: $delegate"
+            exit 1
+          fi
+
+          ./h264-h265/make-dist.sh
+
+      - name: Write checksums
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for dist_dir in h264-only/dist h264-h265/dist; do
+            if [[ -d "$dist_dir" ]]; then
+              find "$dist_dir" -maxdepth 1 -type f -name '*.tar.gz' \
+                -exec cp -t release-assets {} +
+            fi
+          done
+          (cd release-assets && sha256sum * >SHA256SUMS)
+
+      - name: Resolve release tag
+        id: release_tag
+        env:
+          INPUT_TAG: ${{ github.event.inputs.tag }}
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF_TYPE:-}" == "tag" ]]; then
+            tag="$GITHUB_REF_NAME"
+          elif [[ -n "${INPUT_TAG:-}" ]]; then
+            tag="$INPUT_TAG"
+          else
+            tag="v$(date -u +%Y%m%d-%H%M%S)"
+          fi
+
+          echo "tag=$tag" >>"$GITHUB_OUTPUT"
+
+          if [[ "${GITHUB_REF_TYPE:-}" != "tag" ]]; then
+            if git ls-remote --exit-code --tags origin "refs/tags/$tag" >/dev/null 2>&1; then
+              echo "Release tag already exists on origin: $tag"
+            else
+              git config user.name "github-actions[bot]"
+              git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+              git tag "$tag" "$GITHUB_SHA"
+              git push origin "refs/tags/$tag"
+            fi
+          fi
+
+      - name: Write release notes
+        run: |
+          set -euo pipefail
+          {
+            echo "Chrome VAAPI Hotpatch release"
+            echo
+            echo "Assets:"
+            for asset in release-assets/*; do
+              echo "- $(basename "$asset")"
+            done
+            echo
+            echo "Notes:"
+            echo "- The H.264 package is self-contained and patches a local Chrome copy at runtime."
+            echo "- The H.264/H.265 package includes the HEVC delegate bundle."
+            echo "- For unattended tag releases, the workflow uses the h265-delegate-bundle maintenance release unless a bundle URL is provided."
+            echo "- NVIDIA mode expects the experimental nvenc branch of ntoskrnl7/nvidia-vaapi-driver."
+          } >release-notes.md
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
+          PRERELEASE: ${{ github.event.inputs.prerelease }}
+        run: |
+          set -euo pipefail
+
+          prerelease_arg=()
+          if [[ "${PRERELEASE:-true}" == "true" ]]; then
+            prerelease_arg=(--prerelease)
+          fi
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" release-assets/* --clobber
+            gh release edit "$RELEASE_TAG" \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              "${prerelease_arg[@]}"
+          else
+            gh release create "$RELEASE_TAG" release-assets/* \
+              --title "$RELEASE_TAG" \
+              --notes-file release-notes.md \
+              "${prerelease_arg[@]}"
+          fi

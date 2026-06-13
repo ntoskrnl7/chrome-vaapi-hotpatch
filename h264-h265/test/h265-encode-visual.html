@@ -1,0 +1,467 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Chrome HEVC VAAPI Visual Encode Test</title>
+<style>
+  :root {
+    color-scheme: dark;
+    font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: #111315;
+    color: #edf0f2;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background:
+      linear-gradient(135deg, rgba(46, 125, 163, 0.22), transparent 38%),
+      linear-gradient(315deg, rgba(155, 101, 47, 0.16), transparent 34%),
+      #111315;
+  }
+
+  main {
+    width: min(1180px, calc(100vw - 40px));
+    margin: 0 auto;
+    padding: 28px 0 36px;
+  }
+
+  header {
+    display: flex;
+    align-items: end;
+    justify-content: space-between;
+    gap: 24px;
+    margin-bottom: 22px;
+  }
+
+  h1 {
+    margin: 0;
+    font-size: 26px;
+    line-height: 1.1;
+    font-weight: 760;
+    letter-spacing: 0;
+  }
+
+  .status {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 38px;
+    padding: 8px 12px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    font-size: 14px;
+    white-space: nowrap;
+  }
+
+  .dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 999px;
+    background: #aeb5ba;
+    box-shadow: 0 0 0 4px rgba(174, 181, 186, 0.15);
+  }
+
+  .status.running .dot {
+    background: #e5c44a;
+    box-shadow: 0 0 0 4px rgba(229, 196, 74, 0.18);
+  }
+
+  .status.ok .dot {
+    background: #54d18a;
+    box-shadow: 0 0 0 4px rgba(84, 209, 138, 0.18);
+  }
+
+  .status.fail .dot {
+    background: #ff6d6d;
+    box-shadow: 0 0 0 4px rgba(255, 109, 109, 0.18);
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.35fr) minmax(340px, 0.65fr);
+    gap: 18px;
+  }
+
+  .panel {
+    border: 1px solid rgba(255, 255, 255, 0.13);
+    background: rgba(20, 24, 27, 0.78);
+    border-radius: 8px;
+    overflow: hidden;
+  }
+
+  .panel-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    height: 46px;
+    padding: 0 14px;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    color: #cdd5da;
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  canvas {
+    display: block;
+    width: 100%;
+    aspect-ratio: 1520 / 608;
+    background: #0c0e10;
+  }
+
+  .metrics {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    border-top: 1px solid rgba(255, 255, 255, 0.1);
+  }
+
+  .metric {
+    min-width: 0;
+    padding: 12px 14px;
+    border-right: 1px solid rgba(255, 255, 255, 0.09);
+  }
+
+  .metric:last-child {
+    border-right: 0;
+  }
+
+  .label {
+    color: #91a0a8;
+    font-size: 11px;
+    font-weight: 650;
+    text-transform: uppercase;
+  }
+
+  .value {
+    margin-top: 4px;
+    font-variant-numeric: tabular-nums;
+    font-size: 22px;
+    font-weight: 780;
+  }
+
+  .controls {
+    display: flex;
+    gap: 8px;
+  }
+
+  button {
+    height: 32px;
+    padding: 0 12px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: #edf0f2;
+    color: #15181a;
+    border-radius: 7px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  button.secondary {
+    background: rgba(255, 255, 255, 0.08);
+    color: #edf0f2;
+  }
+
+  button:disabled {
+    opacity: 0.48;
+    cursor: default;
+  }
+
+  .chunks {
+    display: grid;
+    gap: 10px;
+    padding: 14px;
+  }
+
+  .chunk {
+    display: grid;
+    grid-template-columns: 58px minmax(0, 1fr) 74px;
+    align-items: center;
+    gap: 10px;
+    min-height: 30px;
+    font-size: 12px;
+    color: #dce2e5;
+  }
+
+  .bar {
+    height: 16px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.08);
+    overflow: hidden;
+  }
+
+  .fill {
+    width: 0;
+    height: 100%;
+    background: linear-gradient(90deg, #54d18a, #4fb3d8);
+    transition: width 180ms ease;
+  }
+
+  pre {
+    height: 266px;
+    margin: 0;
+    padding: 12px 14px;
+    overflow: auto;
+    color: #cbd3d7;
+    background: rgba(0, 0, 0, 0.24);
+    font: 12px/1.5 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    white-space: pre-wrap;
+  }
+
+  @media (max-width: 860px) {
+    main {
+      width: min(100vw - 24px, 720px);
+      padding-top: 18px;
+    }
+
+    header,
+    .grid {
+      grid-template-columns: 1fr;
+      display: grid;
+    }
+
+    .metrics {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .metric:nth-child(2) {
+      border-right: 0;
+    }
+  }
+</style>
+<main>
+  <header>
+    <h1>Chrome HEVC VAAPI Encode</h1>
+    <div id="status" class="status">
+      <span class="dot"></span>
+      <span id="statusText">idle</span>
+    </div>
+  </header>
+
+  <section class="grid">
+    <div class="panel">
+      <div class="panel-title">
+        <span>I420 input preview</span>
+        <div class="controls">
+          <button id="run">Run</button>
+          <button id="clear" class="secondary">Clear</button>
+        </div>
+      </div>
+      <canvas id="preview" width="1520" height="608"></canvas>
+      <div class="metrics">
+        <div class="metric">
+          <div class="label">Frames</div>
+          <div id="frames" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Chunks</div>
+          <div id="chunks" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Bytes</div>
+          <div id="bytes" class="value">0</div>
+        </div>
+        <div class="metric">
+          <div class="label">Codec</div>
+          <div class="value">HEVC</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="panel">
+      <div class="panel-title">
+        <span>Encoded chunks</span>
+        <span id="mode">Annex-B</span>
+      </div>
+      <div id="chunkList" class="chunks"></div>
+      <pre id="log"></pre>
+    </div>
+  </section>
+</main>
+
+<script>
+const width = 1520;
+const height = 608;
+const framerate = 30;
+const frameCount = 10;
+const ySize = width * height;
+const uvSize = (width >> 1) * (height >> 1);
+const config = {
+  codec: 'hvc1.1.6.L180.B0',
+  width,
+  height,
+  bitrate: 1_837_392,
+  framerate,
+  hardwareAcceleration: 'prefer-hardware',
+  hevc: {format: 'annexb'},
+};
+
+const els = {
+  status: document.getElementById('status'),
+  statusText: document.getElementById('statusText'),
+  run: document.getElementById('run'),
+  clear: document.getElementById('clear'),
+  preview: document.getElementById('preview'),
+  frames: document.getElementById('frames'),
+  chunks: document.getElementById('chunks'),
+  bytes: document.getElementById('bytes'),
+  chunkList: document.getElementById('chunkList'),
+  log: document.getElementById('log'),
+};
+
+const ctx = els.preview.getContext('2d', {alpha: false});
+let running = false;
+let chunks = 0;
+let bytes = 0;
+let maxChunk = 1;
+
+function setStatus(state, text) {
+  els.status.className = `status ${state}`;
+  els.statusText.textContent = text;
+}
+
+function log(line) {
+  console.log(line);
+  const now = new Date().toLocaleTimeString();
+  els.log.textContent += `[${now}] ${line}\n`;
+  els.log.scrollTop = els.log.scrollHeight;
+}
+
+function resetUi() {
+  chunks = 0;
+  bytes = 0;
+  maxChunk = 1;
+  els.frames.textContent = '0';
+  els.chunks.textContent = '0';
+  els.bytes.textContent = '0';
+  els.chunkList.textContent = '';
+  els.log.textContent = '';
+  ctx.clearRect(0, 0, width, height);
+  drawPreview(0, true);
+  setStatus('', 'idle');
+}
+
+function drawPreview(i, idle = false) {
+  const gradient = ctx.createLinearGradient(0, 0, width, height);
+  const hue = idle ? 190 : (190 + i * 18) % 360;
+  gradient.addColorStop(0, `hsl(${hue} 68% 44%)`);
+  gradient.addColorStop(0.48, `hsl(${(hue + 72) % 360} 58% 36%)`);
+  gradient.addColorStop(1, `hsl(${(hue + 160) % 360} 64% 42%)`);
+  ctx.fillStyle = gradient;
+  ctx.fillRect(0, 0, width, height);
+
+  ctx.fillStyle = 'rgba(255, 255, 255, 0.22)';
+  const bars = 16;
+  for (let n = 0; n < bars; n++) {
+    const x = n * width / bars;
+    const h = 70 + ((n * 37 + i * 21) % 170);
+    ctx.fillRect(x + 12, height - h - 22, width / bars - 24, h);
+  }
+
+  ctx.fillStyle = 'rgba(0, 0, 0, 0.38)';
+  ctx.fillRect(0, height - 78, width, 78);
+  ctx.fillStyle = '#ffffff';
+  ctx.font = '700 42px system-ui, sans-serif';
+  ctx.fillText(idle ? 'ready' : `frame ${String(i + 1).padStart(2, '0')}`, 34, height - 30);
+}
+
+function makeFrame(i) {
+  drawPreview(i);
+  const data = new Uint8Array(ySize + uvSize * 2);
+  data.fill((32 + i * 3) & 255, 0, ySize);
+  data.fill((96 + i * 5) & 255, ySize, ySize + uvSize);
+  data.fill((160 + i * 7) & 255, ySize + uvSize);
+  return new VideoFrame(data, {
+    format: 'I420',
+    codedWidth: width,
+    codedHeight: height,
+    timestamp: Math.round(i * 1_000_000 / framerate),
+    duration: Math.round(1_000_000 / framerate),
+  });
+}
+
+function addChunk(chunk) {
+  chunks++;
+  bytes += chunk.byteLength;
+  maxChunk = Math.max(maxChunk, chunk.byteLength);
+  els.chunks.textContent = String(chunks);
+  els.bytes.textContent = String(bytes);
+
+  const row = document.createElement('div');
+  row.className = 'chunk';
+  row.innerHTML = `
+    <span>#${chunks}</span>
+    <span class="bar"><span class="fill"></span></span>
+    <span>${chunk.byteLength} B</span>
+  `;
+  els.chunkList.append(row);
+  const fill = row.querySelector('.fill');
+  requestAnimationFrame(() => {
+    fill.style.width = `${Math.max(8, chunk.byteLength / maxChunk * 100)}%`;
+  });
+  log(`chunk ${chunks}: type=${chunk.type} bytes=${chunk.byteLength}`);
+}
+
+async function run() {
+  if (running) {
+    return;
+  }
+  running = true;
+  els.run.disabled = true;
+  resetUi();
+  setStatus('running', 'checking support');
+
+  try {
+    const support = await VideoEncoder.isConfigSupported(config);
+    log('support=' + JSON.stringify({supported: support.supported, config: support.config}));
+    if (!support.supported) {
+      setStatus('fail', 'unsupported');
+      return;
+    }
+
+    const encoder = new VideoEncoder({
+      output: addChunk,
+      error(error) {
+        log(`encoder error callback: ${error.name}: ${error.message}`);
+        setStatus('fail', 'encoder error');
+      },
+    });
+
+    encoder.configure(config);
+    log('configure returned');
+    setStatus('running', 'encoding');
+
+    for (let i = 0; i < frameCount; i++) {
+      const frame = makeFrame(i);
+      encoder.encode(frame, {keyFrame: i === 0});
+      els.frames.textContent = String(i + 1);
+      log(`enqueued ${i + 1}`);
+      frame.close();
+      await new Promise((resolve) => setTimeout(resolve, 70));
+    }
+
+    setStatus('running', 'flushing');
+    log('flush start');
+    await encoder.flush();
+    log(`flush resolved chunks=${chunks} bytes=${bytes}`);
+    encoder.close();
+    setStatus(chunks === frameCount ? 'ok' : 'fail',
+              chunks === frameCount ? 'success' : `partial ${chunks}/${frameCount}`);
+  } catch (error) {
+    log('fatal: ' + (error.stack || error.message || error));
+    setStatus('fail', 'fatal');
+  } finally {
+    running = false;
+    els.run.disabled = false;
+  }
+}
+
+els.run.addEventListener('click', run);
+els.clear.addEventListener('click', resetUi);
+resetUi();
+run();
+</script>

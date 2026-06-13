@@ -1,0 +1,16 @@
+.runtime/
+dist/
+test/probe/bin/
+
+# Local Chrome package experiments.
+downloads/
+extracted/
+
+# Runtime artifacts from older script versions.
+chrome-dir/
+chrome-beta-dir/
+chrome-dev-dir/
+profile-*/
+chrome-*
+*.log
+*.report.json
