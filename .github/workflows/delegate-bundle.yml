@@ -13,9 +13,9 @@ on:
         required: false
         type: string
       publish:
-        description: "Publish to the h265-delegate-bundle maintenance release."
+        description: "Publish to the h265-delegate-bundle maintenance release after the artifact build succeeds."
         required: false
-        default: true
+        default: false
         type: boolean
       install_build_deps:
         description: "Run Chromium's install-build-deps.sh on the runner."
