@@ -28,7 +28,7 @@ tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 
 install -m 0755 "$BUNDLE" "$tmp/$ASSET_NAME"
-sha256sum "$tmp/$ASSET_NAME" >"$tmp/$ASSET_NAME.sha256"
+(cd "$tmp" && sha256sum "$ASSET_NAME" >"$ASSET_NAME.sha256")
 
 source_commit="$(git -C "$REPO_ROOT" rev-parse --short=12 HEAD 2>/dev/null || echo unknown)"
 bundle_sha="$(cut -d' ' -f1 "$tmp/$ASSET_NAME.sha256")"
