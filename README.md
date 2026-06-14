@@ -142,10 +142,12 @@ cd h264-h265
 ./delegate-injection/publish-delegate-bundle.sh
 ```
 
-The same refresh can be run from GitHub Actions with the
-`Build HEVC delegate bundle` manual workflow. That workflow uses the same build
-script, publishes `h265-delegate-bundle` when requested, and uploads the `.so`
-as a workflow artifact.
+The same build can be run from GitHub Actions with the
+`Build HEVC delegate bundle` manual workflow. That workflow uses a shallow
+Chromium checkout where possible and uploads the `.so` as a workflow artifact.
+Publishing to `h265-delegate-bundle` is opt-in through the workflow's
+`publish` input, so inspect the artifact before replacing the maintenance
+asset.
 
 If no URL is provided, the workflow first downloads
 `libh265_delegate_bundle_probe.so` from that maintenance release. If that asset

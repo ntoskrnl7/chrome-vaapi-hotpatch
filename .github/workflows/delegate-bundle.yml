@@ -44,12 +44,28 @@ jobs:
         run: |
           set -euo pipefail
           df -h
+          docker system prune -af --volumes || true
           sudo rm -rf \
             /opt/ghc \
-            /opt/hostedtoolcache/CodeQL \
+            /opt/az \
+            /opt/google \
+            /opt/google-cloud-cli \
+            /opt/hostedtoolcache \
+            /opt/microsoft \
+            /opt/pipx \
+            /usr/lib/jvm \
             /usr/local/lib/android \
+            /usr/local/lib/node_modules \
+            /usr/local/share/chromium \
+            /usr/local/share/edge_driver \
+            /usr/local/share/gecko_driver \
             /usr/local/share/boost \
+            /usr/local/share/powershell \
+            /usr/local/share/vcpkg \
+            /usr/local/.ghcup \
             /usr/share/dotnet \
+            /usr/share/swift \
+            /var/lib/docker \
             || true
           sudo apt-get clean
           df -h

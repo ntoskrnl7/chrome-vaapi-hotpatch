@@ -9,6 +9,8 @@ SRC_ROOT="${SRC_ROOT:-$CHROMIUM_PARENT/src}"
 OUT_DIR="${OUT_DIR:-$SRC_ROOT/out/Release}"
 CHROMIUM_REF="${CHROMIUM_REF:-146.0.7680.177}"
 GN_ARGS="${GN_ARGS:-is_debug=false is_component_build=false is_official_build=true use_sysroot=true use_vaapi=true proprietary_codecs=true ffmpeg_branding=\"Chrome\" symbol_level=0 treat_warnings_as_errors=false}"
+FETCH_CHROMIUM_FLAGS="${FETCH_CHROMIUM_FLAGS:---nohooks --no-history}"
+GCLIENT_SYNC_FLAGS="${GCLIENT_SYNC_FLAGS:---delete_unversioned_trees --no-history --shallow}"
 
 DEFAULT_NINJA_TARGETS=(
   obj/media/gpu/vaapi/common/vaapi_wrapper.o
@@ -69,6 +71,14 @@ need_cmd python3
 
 mkdir -p "$WORKDIR"
 
+print_disk_usage() {
+  echo "disk usage summary:" >&2
+  df -h >&2 || true
+  du -h -d 1 "$WORKDIR" "$SRC_ROOT/out" 2>/dev/null >&2 || true
+}
+
+trap 'status=$?; if [[ $status -ne 0 ]]; then print_disk_usage; fi' EXIT
+
 if [[ ! -d "$DEPOT_TOOLS_DIR/.git" ]]; then
   git clone https://chromium.googlesource.com/chromium/tools/depot_tools.git \
     "$DEPOT_TOOLS_DIR"
@@ -82,14 +92,21 @@ if [[ ! -d "$SRC_ROOT/.git" ]]; then
   mkdir -p "$CHROMIUM_PARENT"
   (
     cd "$CHROMIUM_PARENT"
-    fetch --nohooks chromium
+    # Keep CI checkouts shallow. A full Chromium checkout with all tags and
+    # branch heads can exhaust the standard GitHub-hosted runner disk.
+    # shellcheck disable=SC2086
+    fetch $FETCH_CHROMIUM_FLAGS chromium
   )
 fi
 
 cd "$SRC_ROOT"
-git fetch --tags --force
 if ! git checkout "$CHROMIUM_REF"; then
-  git checkout "tags/$CHROMIUM_REF"
+  if git fetch --depth=1 origin "refs/tags/$CHROMIUM_REF:refs/tags/$CHROMIUM_REF"; then
+    git checkout "tags/$CHROMIUM_REF"
+  else
+    git fetch --depth=1 origin "$CHROMIUM_REF"
+    git checkout FETCH_HEAD
+  fi
 fi
 
 if [[ "${INSTALL_CHROMIUM_BUILD_DEPS:-0}" == "1" ]]; then
@@ -100,7 +117,8 @@ if [[ "${INSTALL_CHROMIUM_BUILD_DEPS:-0}" == "1" ]]; then
   build/install-build-deps.sh
 fi
 
-gclient sync --with_branch_heads --with_tags -D
+# shellcheck disable=SC2086
+gclient sync $GCLIENT_SYNC_FLAGS --revision "src@$CHROMIUM_REF"
 
 need_cmd gn
 need_cmd autoninja

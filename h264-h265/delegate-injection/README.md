@@ -90,9 +90,12 @@ The release workflow uses that asset automatically when `h265_delegate_bundle_ur
 and `H265_DELEGATE_BUNDLE_URL` are not set. The asset is not a user-facing
 runtime package; it is repackaged into `chrome-vaapi-h264-h265-hotpatch.tar.gz`.
 
-The same publish path is available through the `Build HEVC delegate bundle`
-manual GitHub Actions workflow. Use it when you want GitHub Actions to perform
-the Chromium checkout/build and refresh the maintenance release.
+The same build path is available through the `Build HEVC delegate bundle`
+manual GitHub Actions workflow. It uses a shallow Chromium checkout where
+possible and uploads the `.so` as an artifact. Publishing to the
+`h265-delegate-bundle` maintenance release is opt-in through the workflow's
+`publish` input, so inspect the artifact before replacing the maintenance
+asset.
 
 ## Loadability Check
 
