@@ -8,7 +8,7 @@ CHROMIUM_PARENT="$WORKDIR/chromium"
 SRC_ROOT="${SRC_ROOT:-$CHROMIUM_PARENT/src}"
 OUT_DIR="${OUT_DIR:-$SRC_ROOT/out/Release}"
 CHROMIUM_REF="${CHROMIUM_REF:-146.0.7680.177}"
-GN_ARGS="${GN_ARGS:-is_debug=false is_component_build=false is_official_build=true use_sysroot=true use_vaapi=true proprietary_codecs=true ffmpeg_branding=\"Chrome\" symbol_level=0 treat_warnings_as_errors=false}"
+GN_ARGS="${GN_ARGS:-is_debug=false is_component_build=false is_official_build=true chrome_pgo_phase=0 use_sysroot=true use_vaapi=true proprietary_codecs=true ffmpeg_branding=\"Chrome\" symbol_level=0 treat_warnings_as_errors=false}"
 FETCH_CHROMIUM_FLAGS="${FETCH_CHROMIUM_FLAGS:---nohooks --no-history}"
 GCLIENT_SYNC_FLAGS="${GCLIENT_SYNC_FLAGS:---delete_unversioned_trees --no-history --shallow}"
 
