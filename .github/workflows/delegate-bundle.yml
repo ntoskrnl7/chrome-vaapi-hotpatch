@@ -112,7 +112,9 @@ jobs:
           test -s "$bundle"
           test -x "$bundle"
           file "$bundle"
-          sha256sum "$bundle" | tee "$bundle.sha256"
+          bundle_dir="$(dirname "$bundle")"
+          bundle_name="$(basename "$bundle")"
+          (cd "$bundle_dir" && sha256sum "$bundle_name" | tee "$bundle_name.sha256")
           ldd "$bundle"
 
       - name: Upload workflow artifact
