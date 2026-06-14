@@ -146,6 +146,21 @@ bool EnvFlagEnabledOrDefault(const char* name, bool default_value) {
          strcasecmp(value, "no") != 0;
 }
 
+uint32_t EnvUintInRangeOrDefault(const char* name,
+                                 uint32_t default_value,
+                                 uint32_t max_value) {
+  const char* value = getenv(name);
+  if (!value || !*value) {
+    return default_value;
+  }
+  char* end = nullptr;
+  unsigned long parsed = strtoul(value, &end, 10);
+  if (!end || *end != '\0' || parsed == 0 || parsed > max_value) {
+    return default_value;
+  }
+  return static_cast<uint32_t>(parsed);
+}
+
 void InitVAPictureHEVC(VAPictureHEVC* va_pic) {
   *va_pic = {};
   va_pic->picture_id = VA_INVALID_ID;
@@ -411,9 +426,11 @@ bool H265VaapiVideoEncoderDelegate::Initialize(
   visible_size_ = config.input_visible_size;
   use_intel_hevc_tuning_ = IsIntelVaapiImplementation();
   content_type_ = config.content_type;
-  level_idc_ = config.hevc_output_level.value_or(
+  level_idc_ = EnvUintInRangeOrDefault(
+      "CHROME_HEVC_SHIM_LEVEL",
       use_intel_hevc_tuning_ ? kIntelDefaultHevcLevelIdc
-                             : kLegacyDefaultHevcLevelIdc);
+                             : kLegacyDefaultHevcLevelIdc,
+      255);
   const int surface_alignment =
       use_intel_hevc_tuning_ ? kIntelSurfaceAlignmentInPixels
                              : kLegacyMinCodingBlockSizeInPixels;
@@ -627,12 +644,6 @@ void H265VaapiVideoEncoderDelegate::BuildParameterSets(H265VPS& vps,
   vps.vps_max_dec_pic_buffering_minus1[0] =
       base::checked_cast<int>(GetMaxNumOfRefFrames());
   vps.vps_max_latency_increase_plus1[0] = 0;
-  vps.vps_timing_info_present_flag = true;
-  vps.vps_num_units_in_tick = 1;
-  vps.vps_time_scale = framerate_;
-  vps.vps_poc_proportional_to_timing_flag = true;
-  vps.vps_num_ticks_poc_diff_one_minus1 = 0;
-  vps.vps_num_hrd_parameters = 0;
 
   sps.sps_video_parameter_set_id = vps.vps_video_parameter_set_id;
   sps.sps_max_sub_layers_minus1 = vps.vps_max_sub_layers_minus1;
@@ -676,13 +687,7 @@ void H265VaapiVideoEncoderDelegate::BuildParameterSets(H265VPS& vps,
   sps.vui_parameters.colour_primaries = 0;
   sps.vui_parameters.transfer_characteristics = 0;
   sps.vui_parameters.matrix_coeffs = 0;
-  sps.vui_parameters.timing_info_present_flag = true;
-  sps.vui_parameters.num_units_in_tick = 1;
-  sps.vui_parameters.time_scale = framerate_;
-  sps.vui_parameters.poc_proportional_to_timing_flag = true;
-  sps.vui_parameters.num_ticks_poc_diff_one_minus1 = 0;
   sps.vui_parameters.bitstream_restriction_flag = true;
-  sps.vui_parameters.restricted_ref_pic_lists_flag = true;
   sps.vui_parameters.min_spatial_segmentation_idc = 0;
   sps.vui_parameters.max_bytes_per_pic_denom = 0;
   sps.vui_parameters.max_bits_per_min_cu_denom = 0;
@@ -1228,82 +1233,9 @@ bool H265VaapiVideoEncoderDelegate::SubmitFrameParameters(
             packed_sequence_data_.size(), va_buffers.size());
   }
 
-  const bool submit_packed_slice =
-      submit_packed_headers_ &&
-      (idr ||
-       !EnvFlagEnabledOrDefault("CHROME_HEVC_SHIM_PACKED_SLICE_IDR_ONLY",
-                                false));
-  if (submit_packed_slice) {
-    fprintf(stderr, "chrome_hevc_shim: SubmitFrameParameters packed slice build start\n");
-    DCHECK(packed_header_sps_);
-    DCHECK(packed_header_pps_);
-    const H265SPS& sps = *packed_header_sps_;
-    const H265PPS& pps = *packed_header_pps_;
-
-    H265SliceHeader packed_slice_header = {};
-    packed_slice_header.nal_unit_type = pic->nal_unit_type_;
-    packed_slice_header.irap_pic = idr;
-    packed_slice_header.first_slice_segment_in_pic_flag = true;
-    packed_slice_header.no_output_of_prior_pics_flag = false;
-    packed_slice_header.pic_output_flag = true;
-    packed_slice_header.slice_pic_parameter_set_id =
-        pic_param.slice_pic_parameter_set_id;
-    packed_slice_header.slice_type =
-        idr ? H265SliceHeader::kSliceTypeI : H265SliceHeader::kSliceTypeP;
-    const int pic_order_cnt_lsb_bits =
-        sps.log2_max_pic_order_cnt_lsb_minus4 + 4;
-    CHECK_LT(pic_order_cnt_lsb_bits, 32);
-    const uint32_t pic_order_cnt_lsb_mask =
-        (1u << pic_order_cnt_lsb_bits) - 1u;
-    packed_slice_header.slice_pic_order_cnt_lsb = base::checked_cast<int>(
-        base::checked_cast<uint32_t>(pic_param.decoded_curr_pic.pic_order_cnt) &
-        pic_order_cnt_lsb_mask);
-    packed_slice_header.short_term_ref_pic_set_sps_flag = idr;
-    if (!idr) {
-      packed_slice_header.st_ref_pic_set.num_negative_pics = 1;
-      packed_slice_header.st_ref_pic_set.num_positive_pics = 0;
-      packed_slice_header.st_ref_pic_set.delta_poc_s0[0] = -1;
-      packed_slice_header.st_ref_pic_set.used_by_curr_pic_s0[0] = true;
-      packed_slice_header.st_ref_pic_set.num_delta_pocs = 1;
-    }
-    packed_slice_header.slice_sao_luma_flag = false;
-    packed_slice_header.slice_sao_chroma_flag = false;
-    packed_slice_header.num_ref_idx_active_override_flag = false;
-    packed_slice_header.num_ref_idx_l0_active_minus1 =
-        slice_param.num_ref_idx_l0_active_minus1;
-    packed_slice_header.num_ref_idx_l1_active_minus1 =
-        slice_param.num_ref_idx_l1_active_minus1;
-    packed_slice_header.five_minus_max_num_merge_cand = 0;
-    packed_slice_header.slice_qp_delta = slice_param.slice_qp_delta;
-    packed_slice_header.slice_cb_qp_offset = 0;
-    packed_slice_header.slice_cr_qp_offset = 0;
-    packed_slice_header.slice_loop_filter_across_slices_enabled_flag =
-        slice_param.slice_fields.bits.slice_loop_filter_across_slices_enabled_flag;
-
-    // Build a complete packed slice header, including the RBSP stop bit, so
-    // the resulting payload matches FFmpeg's first-slice layout
-    // (`00000001 26 01 AE 80` for the current IDR case) and the driver can
-    // prepend a distinct slice NAL unit to the coded bitstream.
-    H26xAnnexBBitstreamBuilder packed_slice(false);
-    BuildPackedH265SliceHeader(packed_slice, sps, pps, packed_slice_header,
-                               /*add_rbsp_trailing_bits=*/true);
-    fprintf(stderr,
-            "chrome_hevc_shim: SubmitFrameParameters packed slice built "
-            "bytes=%zu bits=%zu\n",
-            packed_slice.BytesInBuffer(), packed_slice.BitsInBuffer());
-    fprintf(stderr,
-            "chrome_hevc_shim: SubmitFrameParameters skip local "
-            "SetBitstreamInjection on Chrome-owned EncodeJob\n");
-    append_packed_header(VAEncPackedHeaderHEVC_Slice,
-                         packed_slice.data().data(),
-                         packed_slice.BytesInBuffer(),
-                         packed_slice.BitsInBuffer(),
-                         /*has_emulation_bytes=*/1);
-    fprintf(stderr,
-            "chrome_hevc_shim: SubmitFrameParameters packed slice appended "
-            "buffers=%zu\n",
-            va_buffers.size());
-  }
+  // Chromium 146 does not expose a packed HEVC slice-header builder. Keep the
+  // self-contained build on upstream 146 by submitting the packed sequence
+  // header and regular VA slice parameters only.
 
   va_buffers.push_back(
       {VAEncSliceParameterBufferType, sizeof(slice_param), &slice_param});

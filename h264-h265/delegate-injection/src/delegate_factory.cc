@@ -146,9 +146,6 @@ class H265VaapiVideoEncoderDelegateShim
         media::VideoEncodeAccelerator::Config::ContentType::kCamera);
     local_config.gop_length = 10000;
     int hevc_level = EnvInt("CHROME_HEVC_SHIM_LEVEL", 0);
-    if (hevc_level > 0 && hevc_level <= 255) {
-      local_config.hevc_output_level = (uint8_t)hevc_level;
-    }
 
     fprintf(stderr,
             "chrome_hevc_shim: Initialize local size=%dx%d bitrate=%u "
