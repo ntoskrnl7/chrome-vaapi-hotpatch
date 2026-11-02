@@ -48,6 +48,11 @@ jobs:
             python3 \
             xz-utils
 
+      - name: Test launcher policy and packed-header negotiation
+        run: |
+          python3 -m unittest discover -s tests -v
+          make -C h264-h265/injector check
+
       - name: Build H.264 release package
         run: ./h264-only/make-dist.sh
 

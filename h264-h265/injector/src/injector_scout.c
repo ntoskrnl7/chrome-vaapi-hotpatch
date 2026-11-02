@@ -1,6 +1,7 @@
 #define _GNU_SOURCE
 
 #include <dlfcn.h>
+#include <limits.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,6 +43,8 @@ typedef VAStatus (*VaCreateConfigFn)(VADisplay,
                                      VAConfigAttrib*,
                                      int,
                                      VAConfigID*);
+typedef VAStatus (*VaGetConfigAttributesFn)(VADisplay, VAProfile, VAEntrypoint,
+                                          VAConfigAttrib*, int);
 typedef VAStatus (*VaCreateContextFn)(VADisplay,
                                       VAConfigID,
                                       int,
@@ -133,6 +136,7 @@ static __thread int g_in_dlsym_hook;
 static VaQueryConfigProfilesFn g_real_vaQueryConfigProfiles;
 static VaQueryConfigEntrypointsFn g_real_vaQueryConfigEntrypoints;
 static VaCreateConfigFn g_real_vaCreateConfig;
+static VaGetConfigAttributesFn g_real_vaGetConfigAttributes;
 static VaCreateContextFn g_real_vaCreateContext;
 static VaCreateSurfacesFn g_real_vaCreateSurfaces;
 static VaCreateBufferFn g_real_vaCreateBuffer;
@@ -253,6 +257,9 @@ void* dlsym(void* handle, const char* symbol) {
     replacement = (void*)vaQueryConfigEntrypoints;
   } else if (strcmp(symbol, "vaCreateConfig") == 0) {
     g_real_vaCreateConfig = (VaCreateConfigFn)original;
+    // Chromium loads libva locally; resolve capabilities from the same handle.
+    g_real_vaGetConfigAttributes =
+        (VaGetConfigAttributesFn)fn(handle, "vaGetConfigAttributes");
     replacement = (void*)vaCreateConfig;
   } else if (strcmp(symbol, "vaCreateContext") == 0) {
     g_real_vaCreateContext = (VaCreateContextFn)original;
@@ -375,25 +382,43 @@ VAStatus vaCreateConfig(VADisplay dpy,
         (VaCreateConfigFn)real_symbol(RTLD_NEXT, "vaCreateConfig");
   }
 
-  VAConfigAttrib patched_attribs[8];
+  VAConfigAttrib* patched_attribs = NULL;
   if ((profile == kVAProfileHEVCMain || profile == kVAProfileHEVCMain10) &&
       entrypoint == kVAEntrypointEncSlice &&
-      env_on("CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS") && attrib_list &&
-      num_attribs > 0 && num_attribs < (int)(sizeof(patched_attribs) /
-                                             sizeof(patched_attribs[0]))) {
+      env_on("CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS") &&
+      num_attribs >= 0 && num_attribs < INT_MAX &&
+      (num_attribs == 0 || attrib_list)) {
     int has_packed_headers = 0;
     for (int i = 0; i < num_attribs; ++i) {
-      patched_attribs[i] = attrib_list[i];
       has_packed_headers |=
           attrib_list[i].type == kVAConfigAttribEncPackedHeaders;
     }
     if (!has_packed_headers) {
-      patched_attribs[num_attribs].type = kVAConfigAttribEncPackedHeaders;
-      patched_attribs[num_attribs].value =
-          kVAPackedHeaderSequencePictureSlice;
-      attrib_list = patched_attribs;
-      ++num_attribs;
-      scout_log("appended HEVC packed-header attrib before vaCreateConfig");
+      if (!g_real_vaGetConfigAttributes) {
+        g_real_vaGetConfigAttributes =
+            (VaGetConfigAttributesFn)real_symbol(RTLD_NEXT,
+                                                "vaGetConfigAttributes");
+      }
+      VAConfigAttrib supported = {kVAConfigAttribEncPackedHeaders, 0};
+      if (g_real_vaGetConfigAttributes &&
+          g_real_vaGetConfigAttributes(dpy, profile, entrypoint, &supported, 1) == 0 &&
+          supported.value != 0x80000000U) {  // VA_ATTRIB_NOT_SUPPORTED
+        // Intel uses sequence/slice headers; the NVENC delegate uses sequence/picture.
+        supported.value &= kVAPackedHeaderSequencePictureSlice;
+        if (supported.value) {
+          patched_attribs = calloc((size_t)num_attribs + 1, sizeof(*patched_attribs));
+          if (patched_attribs) {
+            if (num_attribs > 0) {
+              memcpy(patched_attribs, attrib_list,
+                     (size_t)num_attribs * sizeof(*patched_attribs));
+            }
+            patched_attribs[num_attribs] = supported;
+            attrib_list = patched_attribs;
+            ++num_attribs;
+            scout_log("appended supported HEVC packed headers: 0x%x", supported.value);
+          }
+        }
+      }
     }
   }
 
@@ -408,6 +433,7 @@ VAStatus vaCreateConfig(VADisplay dpy,
   }
   VAStatus ret = g_real_vaCreateConfig(dpy, profile, entrypoint, attrib_list,
                                        num_attribs, config_id);
+  free(patched_attribs);
   if (profile == kVAProfileHEVCMain || profile == kVAProfileHEVCMain10 ||
       entrypoint == kVAEntrypointEncSlice) {
     scout_log("vaCreateConfig ret=%d profile=%d entrypoint=%d config=%u", ret,

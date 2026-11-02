@@ -28,6 +28,7 @@ env LD_PRELOAD="$PROBE" \
     --autoplay-policy=no-user-gesture-required \
     --enable-logging=stderr \
     --vmodule='*vaapi*=4,*video*=3,*media*=3,*webcodecs*=3' \
+    "$@" \
     "file://$TEST_PAGE" \
     > "$CHROME_LOG" 2>&1
 status=$?

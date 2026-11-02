@@ -51,6 +51,30 @@ if [[ "$PREPARE_ONLY" == 1 ]]; then
   exit 0
 fi
 
+driver="${CHROME_H264_VAAPI_DRIVER:-${LIBVA_DRIVER_NAME:-auto}}"
+if [[ "${driver,,}" == auto ]] && command -v vainfo >/dev/null 2>&1; then
+  if command -v timeout >/dev/null 2>&1; then
+    driver="$(timeout "${CHROME_H264_VAINFO_TIMEOUT:-2s}" vainfo 2>&1 || true)"
+  fi
+fi
+features=AcceleratedVideoEncoder
+gpu_args=()
+case "${driver,,}" in
+  *nvidia*|*nvdec*|*nvenc*|nv)
+    if [[ "${CHROME_H264_SET_LIBVA_DRIVER_NAME:-1}" == 1 ]]; then
+      export LIBVA_DRIVER_NAME=nvidia
+    fi
+    features+=",VaapiIgnoreDriverChecks,VaapiOnNvidiaGPUs"
+    if [[ "${CHROME_H264_IGNORE_GPU_BLOCKLIST:-1}" == 1 ]]; then
+      gpu_args+=(--ignore-gpu-blocklist)
+    fi
+    ;;
+esac
+if [[ -n "${CHROME_H264_EXTRA_FEATURES:-}" ]]; then
+  features+=",$CHROME_H264_EXTRA_FEATURES"
+fi
+
 exec "$PATCHED_CHROME" \
-  --enable-features=AcceleratedVideoEncoder \
+  "${gpu_args[@]}" \
+  --enable-features="${CHROME_H264_ENABLE_FEATURES:-$features}" \
   "$@"

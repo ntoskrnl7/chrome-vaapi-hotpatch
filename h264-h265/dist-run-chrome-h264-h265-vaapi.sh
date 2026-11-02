@@ -73,6 +73,9 @@ detect_vaapi_driver_mode() {
 
 feature_arg() {
   local features="AcceleratedVideoEncoder"
+  if [[ "$VAAPI_DRIVER_MODE" == "nvidia" ]]; then
+    features+=",VaapiOnNvidiaGPUs"
+  fi
   if [[ "${CHROME_H265_ENABLE_VAAPI_IGNORE_DRIVER_CHECKS:-0}" == "1" ]]; then
     features+=",VaapiIgnoreDriverChecks"
   fi
@@ -171,6 +174,7 @@ COMMON_ENV=(
   "CHROME_H265_RESOLVED_VAAPI_DRIVER=$VAAPI_DRIVER_MODE"
   "CHROME_HEVC_SHIM_LEVEL=${CHROME_HEVC_SHIM_LEVEL:-180}"
   "CHROME_HEVC_SCOUT_FORCE_CODED_BUFFER_SIZE=${CHROME_HEVC_SCOUT_FORCE_CODED_BUFFER_SIZE:-524288}"
+  "CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS=${CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS:-1}"
   "LD_PRELOAD=$PRELOAD"
 )
 if [[ -n "${LIBVA_DRIVER_NAME:-}" ]]; then
