@@ -1,7 +1,7 @@
 # Chrome H.264 VAAPI Encoder Hotpatch
 
 Small Linux x86_64 hotpatch package for Google Chrome H.264 WebCodecs VAAPI
-hardware encoding on Intel iHD systems.
+hardware encoding on Intel iHD and experimental NVIDIA VAAPI systems.
 
 It does not overwrite `/opt/google/chrome/chrome`. It copies the Chrome binary
 into this package directory, applies the hotpatch to that copy, and launches the
@@ -12,7 +12,8 @@ patched copy with the required feature flags.
 - Linux x86_64
 - Google Chrome installed at `/opt/google/chrome/chrome`, or set
   `CHROME_SOURCE`
-- Intel VAAPI/iHD driver with H.264 encode support
+- A VAAPI driver with H.264 encode support (Intel iHD or the experimental
+  `nvenc` branch of `ntoskrnl7/nvidia-vaapi-driver` for NVIDIA)
 - `python3`, `readelf`, `find`, `cp`, `rg`
 
 ## Run Patched Chrome
@@ -26,6 +27,17 @@ The launcher automatically adds:
 ```text
 --enable-features=AcceleratedVideoEncoder
 ```
+
+NVIDIA mode also adds `VaapiOnNvidiaGPUs`, `VaapiIgnoreDriverChecks`, and
+`--ignore-gpu-blocklist`. Select it with `LIBVA_DRIVER_NAME=nvidia` or
+`CHROME_H264_VAAPI_DRIVER=nvidia`; auto mode checks `vainfo` when available.
+Use `CHROME_H264_EXTRA_FEATURES` to extend the feature list, or
+`CHROME_H264_ENABLE_FEATURES` to replace it.
+
+Encoding and browser decoding require separate validation. The RTX A2000 /
+Chrome 148 round-trip test passed on a Wayland desktop with
+`--ozone-platform=wayland --use-gl=angle --use-angle=gl`; the tested X11/ANGLE
+OpenGL configuration encoded but failed decoder frame-pool initialization.
 
 ## Repatch After Chrome Updates
 

@@ -7,9 +7,15 @@ BIN := bin
 SCOUT_TARGET := $(BIN)/libchrome_hevc_delegate_scout.so
 TRAMPOLINE_TARGET := $(BIN)/libchrome_hevc_trampoline_probe.so
 
-.PHONY: all clean
+.PHONY: all check clean
 
 all: $(SCOUT_TARGET) $(TRAMPOLINE_TARGET)
+
+check: $(BIN)/test-packed-headers
+	./$(BIN)/test-packed-headers
+
+$(BIN)/test-packed-headers: tests/test-packed-headers.c src/injector_scout.c | $(BIN)
+	$(CC) $(CFLAGS) -o $@ $< -ldl
 
 $(BIN):
 	mkdir -p $(BIN)

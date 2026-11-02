@@ -113,6 +113,53 @@ CHROME_H265_VAAPI_DRIVER=nvidia \
 Use `vainfo` with the same driver environment to confirm the advertised
 decode/encode entrypoints on the target machine.
 
+In NVIDIA mode, both launchers add `VaapiOnNvidiaGPUs`,
+`VaapiIgnoreDriverChecks`, and `--ignore-gpu-blocklist`. The first feature lets
+Chrome open the NVIDIA render node; it does not add encoding support to the
+driver. The H.264-only launcher detects `LIBVA_DRIVER_NAME` or `vainfo`, or can
+be selected explicitly with `CHROME_H264_VAAPI_DRIVER=nvidia`.
+
+The combined runtime negotiates HEVC packed headers using the driver's reported
+capabilities. It does not request packed slice headers from NVENC when only
+sequence/picture headers are supported. Explicit application attributes remain
+unchanged. Set `CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS=0` to disable this
+compatibility behavior for diagnosis.
+
+Use `CHROME_H264_EXTRA_FEATURES` or `CHROME_H265_EXTRA_FEATURES` to add Chrome
+features without losing the launcher's defaults. The corresponding
+`CHROME_H264_ENABLE_FEATURES` / `CHROME_H265_ENABLE_FEATURES` variables replace
+the complete list. Passing another `--enable-features` argument can also
+override it. Intel mode does not enable the NVIDIA-specific defaults.
+
+An encode self-test passing does not establish browser hardware decode support.
+On an RTX A2000 (driver 570.211.01), Chrome 148.0.7778.96 passed WebCodecs
+hardware encode/decode round trips with Wayland and ANGLE OpenGL. The tested
+X11/ANGLE OpenGL configuration encoded successfully but failed to initialize
+the decoder frame pool. On a Wayland desktop, use:
+
+```bash
+LIBVA_DRIVER_NAME=nvidia ./run-h264-h265-vaapi.sh \
+  --ozone-platform=wayland --use-gl=angle --use-angle=gl
+```
+
+The same display arguments work with `run-h264-vaapi.sh` and the encode
+self-tests. The launchers do not force a display backend.
+
+Validation covered 30-frame H.264 round trips at 640x360, 1920x1080,
+1600x900, and 638x358, and HEVC at 640x360, 1920x1080, and 1520x608,
+including delta frames and FFmpeg software/VA-API decoding. These checks used
+the driver review build at `67fcc44`, not a distribution driver.
+An additional HEVC 638x358 test produced a 640x360 stream with visible padding;
+that cropping issue remains unresolved. Do not assume arbitrary HEVC sizes,
+other Chrome versions, or other display backends pass from these results.
+
+CPU-only regression checks (no Chrome or GPU required):
+
+```bash
+python3 -m unittest discover -s tests -v
+make -C h264-h265/injector check
+```
+
 ## Release Packages
 
 GitHub Actions can publish ready-to-use tarballs from a tag or manual workflow

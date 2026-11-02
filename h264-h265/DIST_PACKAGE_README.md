@@ -87,9 +87,23 @@ or `nvenc`, or when `vainfo` reports `NVDEC`, `NVENC`, or `NVIDIA`.
 In NVIDIA mode the launcher:
 
 - sets `LIBVA_DRIVER_NAME=nvidia` by default;
-- enables `VaapiIgnoreDriverChecks`;
+- enables `VaapiIgnoreDriverChecks` and `VaapiOnNvidiaGPUs`;
 - passes `--ignore-gpu-blocklist`;
 - enables `CHROME_HEVC_TRAMPOLINE_RETRY_HEVC_CQP=1`.
+
+The runtime also negotiates missing HEVC packed-header attributes from the
+driver's advertised capabilities, without requesting unsupported packed slice
+headers. Explicit attributes are preserved. For diagnosis, disable this with
+`CHROME_HEVC_SCOUT_APPEND_HEVC_PACKED_HEADERS=0`.
+
+Use `CHROME_H265_EXTRA_FEATURES` to extend the defaults; setting
+`CHROME_H265_ENABLE_FEATURES` replaces them entirely.
+
+For browser decoding on a Wayland desktop, the RTX A2000 / Chrome 148 test
+passed with `--ozone-platform=wayland --use-gl=angle --use-angle=gl`.
+The tested X11/ANGLE OpenGL setup failed decoder frame-pool initialization
+despite successful encoding. HEVC 638x358 also has an unresolved cropping
+issue (640x360 output); successful standard-size tests do not cover all sizes.
 
 The injected HEVC delegate also detects the resolved VAAPI driver mode. Intel
 drivers keep the Intel iHD tuning path; NVIDIA and other non-Intel drivers use
